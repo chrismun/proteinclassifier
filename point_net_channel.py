@@ -10,7 +10,7 @@ import numpy as np
 import torch.nn.functional as F
 from sklearn.model_selection import train_test_split
 
-
+# input transform ; spatial transformation newtwork (now 5d)
 class STN3d(nn.Module):
     """ First Trasformation applied on the input """
     def __init__(self):
@@ -63,7 +63,6 @@ class STN3d(nn.Module):
         return x
 
 
-
 class STNkd(nn.Module):
     """ Trasformation on the features vector"""
     def __init__(self, k=64):
@@ -104,6 +103,8 @@ class STNkd(nn.Module):
         x = x + iden
         x = x.view(-1, self.k, self.k)
         return x
+
+
 class PointNetfeat(nn.Module):
     """ Instance normalisation replaces batch normalization"""
     def __init__(self, global_feat = True, feature_transform = False, point_transform = False):
@@ -152,11 +153,12 @@ class PointNetfeat(nn.Module):
             x = x.view(-1, 1024, 1).repeat(1, 1, n_pts)
             return torch.cat([x, pointfeat], 1), trans, trans_feat
 
+
 class PointNetCls(nn.Module):
 
     """ After the max pooling form the pointfeat architecture and outputs the classification.
     Args:
-        k (int): number of classification
+        k (int): number of classifications/labels
         feature_transform (bool) : option to do the feature transform (STK3d)
         point_transform (bool) : option to do point transform (STN3d)
         batch_status_of_network (bool) : Option to do batch_normalization or instance normalization
@@ -195,6 +197,7 @@ class PointNetCls(nn.Module):
         x = self.fc3(x)
         return F.log_softmax(x, dim=1), trans, trans_feat
 
+
 def feature_transform_regularizer(trans):
     d = trans.size()[1]
     batchsize = trans.size()[0]
@@ -229,8 +232,3 @@ if __name__ == '__main__':
     cls = PointNetCls(k = 5,batch_status_of_network=True)
     out, _, _ = cls(sim_data)
     print('class', out.size())
-
-
-
-
-

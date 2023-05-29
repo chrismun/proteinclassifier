@@ -17,7 +17,7 @@ from torch.autograd import Variable
 import numpy as np
 import torch.nn.functional as F
 from sklearn.model_selection import train_test_split
-from my_pointnet.point_net_channel import *
+from point_net_channel import *
 import matplotlib.pyplot as plt
 from pprint import pprint
 from tqdm import tqdm
@@ -30,23 +30,17 @@ from sklearn.metrics import confusion_matrix, f1_score, precision_score, recall_
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 wandb.login()
 
-
-
-
-
 config_default = {
 
-    'csv_path': '/Users/bivekpokhrel/PycharmProjects/database/data/proteins-2023-04-15.csv',
-    'source_folder': '/Users/bivekpokhrel/PycharmProjects/database/data/pdb_3',
-    'destination_folder': '/Users/bivekpokhrel/PycharmProjects/database/data/trans_folder',
-    'checkpoint_folder': '/Users/bivekpokhrel/PycharmProjects/database/my_pointnet/my_checkpoint',
+    'csv_path': '/Users/Peter Munley/lyman/proteinclassifier/data/proteins-2023-04-15.csv',
+    'source_folder': '/Users/Peter Munley/lyman/proteinclassifier/data/pdb',
+    'destination_folder': '/Users/Peter Munley/lyman/proteinclassifier/data/trans_folder',
+    'checkpoint_folder': '/Users/Peter Munley/lyman/proteinclassifier/my_checkpoint',
     'load_previous_epoch': False, # True if want to load
     'resume_epoch':0, # check the last epoch from the saved checkpoint
     'num_protiens':75,
     'min_counts':3
                     }
-
-
 
 
 sweep_config = {
@@ -79,11 +73,6 @@ sweep_config = {
 
 
 sweep_id= wandb.sweep(sweep_config,project="Pointnet_training_allchannel5")
-#
-
-
-
-
 
 
 # initial_time = timeit.default_timer()
@@ -114,7 +103,6 @@ def get_key_by_value(dict_obj, value):
 # def get_coords(protien_path):
 #     return utils.parsePDB(protien_path, keep_hetatm=False)[0]
 
-
 def get_coords(protien_path):
     coords,atname=utils.parsePDB(protien_path, keep_hetatm=False)[0],utils.parsePDB(protien_path, keep_hetatm=False)[1]
     radius=utils.atomlistToRadius(atname)
@@ -126,10 +114,7 @@ def calulate_cm(predictions, labels):
     cm = confusion_matrix(predictions, labels)
     return cm
 
-
-
 # Log metrics to wandb
-
 
 
 def calculate_precision(predictions, labels):
@@ -146,7 +131,6 @@ def calculate_f1_score(predictions, labels):
     # Calculate F1 score
     f1 = f1_score(labels, predictions, average='weighted',zero_division=1)
     return f1
-
 
 
 ## to make use of the padding (equal size) from pyuul making folder
@@ -290,12 +274,6 @@ def collate_fn(batch):
     return torch.stack(inputs), torch.stack(labels), indices
 
 
-
-
-
-
-
-
 class Mydataset(Dataset):
     def __init__(self, images, classes):
         self.images=images
@@ -309,10 +287,10 @@ class Mydataset(Dataset):
         a1=a.clone().detach()
         b1=b.clone().detach()
         return a1,b1,index
-#create folder
+
+# create folder
 # print('********')
-#
-#
+
 def build_set(csv_path,padding):
 
     inputs, labels, pdbs, k, class_names = make_lists(csv_path, padding=padding)
@@ -326,7 +304,6 @@ def build_set(csv_path,padding):
     return train_set, val_set, test_set, k, class_names
 
 
-#
 def build_optimizer(network,learning_rate):
 
     optimizer=torch.optim.SGD(network.parameters(),lr=learning_rate)
@@ -340,6 +317,7 @@ def calculate_accuracy(outputs, labels):
     total = labels.size(0)
     accuracy = 100 * correct / total
     return accuracy
+
 
 def train_epoch(network, train_loader, val_loader, optimizer, feature_transform,num_class,class_names):
     running_loss = 0.0
@@ -422,18 +400,6 @@ def train_epoch(network, train_loader, val_loader, optimizer, feature_transform,
     return train_loss, val_loss, train_accuracy, val_accuracy, f1, precision, recall, cm
 
 
-
-
-
-
-
-
-
-
-
-
-
-
 def train(config=None):
     with wandb.init(config=config):
         config = wandb.config
@@ -500,8 +466,3 @@ def train(config=None):
 
 
 wandb.agent(sweep_id,train,count=3)
-
-
-
-
-
