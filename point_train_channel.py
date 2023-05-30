@@ -27,21 +27,47 @@ import wandb
 import numpy as np
 from sklearn.metrics import confusion_matrix, f1_score, precision_score, recall_score
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda")
 wandb.login()
+
+path = "/home/2802/proteinclassifier"
 
 config_default = {
 
-    'csv_path': '/Users/Peter Munley/lyman/proteinclassifier/data/proteins-2023-04-15.csv',
-    'source_folder': '/Users/Peter Munley/lyman/proteinclassifier/data/pdb',
-    'destination_folder': '/Users/Peter Munley/lyman/proteinclassifier/data/trans_folder',
-    'checkpoint_folder': '/Users/Peter Munley/lyman/proteinclassifier/my_checkpoint',
+    'csv_path': '{path}/data/proteins-2023-04-15.csv',
+    'source_folder': '{path}/data/pdb',
+    'destination_folder': '{path}/data/trans_folder',
+    'checkpoint_folder': '{path}/my_checkpoint',
     'load_previous_epoch': False, # True if want to load
     'resume_epoch':0, # check the last epoch from the saved checkpoint
     'num_protiens':75,
     'min_counts':3
                     }
 
+
+sweep_config_single = {
+    'method': 'grid',
+    'parameters': {
+        'optimizer': {
+            'values': ['sgd']
+        },
+        'batch_size': {
+            'values': [1]
+        },
+        'learning_rate': {
+            'values': [0.001]
+        },
+        'feature_transform': {
+            'values': [True]
+        },
+        'point_transform': {
+            'values': [True]
+        },
+        'num_epoch': {
+            'value': 80
+        }
+    }
+}
 
 sweep_config = {
     'method': 'random',
@@ -72,7 +98,7 @@ sweep_config = {
 }
 
 
-sweep_id= wandb.sweep(sweep_config,project="Pointnet_training_allchannel5")
+sweep_id= wandb.sweep(sweep_config_single,project="proteinclassifier")
 
 
 # initial_time = timeit.default_timer()

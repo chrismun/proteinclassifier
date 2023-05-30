@@ -1,2 +1,5 @@
 testing/
 data/
+wandb/
+__pycache__/
+.chris.py.swp
