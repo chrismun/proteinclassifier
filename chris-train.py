@@ -26,6 +26,7 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 num_epochs = 10
 batch_size = 4
 learning_rate = 0.001
+min_samples = 40
 
 # Dataset 
 class ProteinDataset(Dataset):
@@ -34,11 +35,11 @@ class ProteinDataset(Dataset):
         # data loading
         full_protein_list = pd.read_csv("./data/proteins.csv")
         transMemProteins = full_protein_list[full_protein_list['type_id'] == 1]
-        transMemProteins = transMemProteins.head(1000)
+        # transMemProteins = transMemProteins.head(2000)
         transMemProteins['pdbid'] = transMemProteins['pdbid'].str.replace('[^\w]', '', regex=True)  # remove "=...." extra characters
         counts = transMemProteins['membrane_name_cache'].value_counts()
         label_dict_counts = {key: counts[key] for key in counts.index}
-        selected_list = [key for key, value in label_dict_counts.items() if value > 4]
+        selected_list = [key for key, num_samples in label_dict_counts.items() if num_samples > min_samples]
         k = len(selected_list)
         transMemProteins = transMemProteins[transMemProteins['membrane_name_cache'].isin(selected_list)]
         labels = transMemProteins['membrane_name_cache'].unique()
@@ -51,25 +52,38 @@ class ProteinDataset(Dataset):
             file_name = pdb_id + '.pdb'
             file_path = os.path.join('./data/pdb', file_name)
 
-            coords, atname = utils.parsePDB(file_path, keep_hetatm=False)
-            radius = utils.atomlistToRadius(atname)
-            atomType = utils.atomlistToChannels(atname)
+            if os.path.exists(file_path):
+                coords, atname = utils.parsePDB(file_path, keep_hetatm=False)
+                radius = utils.atomlistToRadius(atname)
+                atomType = utils.atomlistToChannels(atname)
 
-            radius = radius.tolist()[0]
-            atomType = atomType.tolist()[0]
+                radius = radius.tolist()[0]
+                atomType = atomType.tolist()[0]
 
-            coords = coords.tolist()
-            coords = coords[0]
-            i = 0
+                file_name = pdb_id + '.pdb'
+                file_path = os.path.join('./data/pdb', file_name)
 
-            for coord in coords:
-                coord.append(radius[i])
-                coord.append(atomType[i])
+                coords, atname = utils.parsePDB(file_path, keep_hetatm=False)
+                radius = utils.atomlistToRadius(atname)
+                atomType = utils.atomlistToChannels(atname)
 
-            a = transMemProteins.loc[transMemProteins['pdbid'] == pdb_id, 'membrane_name_cache'].iloc[0]
+                radius = radius.tolist()[0]
+                atomType = atomType.tolist()[0]
 
-            x.append(coords)
-            y.append([label_dict[a]])
+                coords = coords.tolist()
+                coords = coords[0]
+                i = 0
+
+                for coord in coords:
+                    coord.append(radius[i])
+                    coord.append(atomType[i])
+
+                a = transMemProteins.loc[transMemProteins['pdbid'] == pdb_id, 'membrane_name_cache'].iloc[0]
+
+                x.append(coords)
+                y.append([label_dict[a]])
+            else:
+                print(f"The file {file_path} does not exist.")
 
         # fixing varying size
         max_len = max(len(entry) for entry in x)
@@ -101,7 +115,7 @@ train_loader = DataLoader(dataset=train_dataset, batch_size=4, shuffle=True, num
 test_loader = DataLoader(dataset=test_dataset, batch_size=4, shuffle=False, num_workers=1, drop_last=True)
 
 print(f'length of train: {len(train_dataset)}, length of test: {len(test_dataset)}')
-num_classes = 12
+num_classes = 14
 print("num_classes = ", num_classes)
 
 # Create model, optimizer, scheduler

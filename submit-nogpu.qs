@@ -21,7 +21,7 @@
 #        kibi, mebi, gibi, and tebibyte units.  Delete the space between
 #        the "#" and the word SBATCH to enable one of them:
 #
-#SBATCH --mem=8G
+#SBATCH --mem=512G
 # SBATCH --mem-per-cpu=1024M
 #
 # [EDIT] Each node in the cluster has local scratch disk of some sort
@@ -39,7 +39,7 @@
 #        the job (be sure to use quotes if there's whitespace in the
 #        name):
 #
-#SBATCH --job-name=protcls
+#SBATCH --job-name=testcls
 #
 # [EDIT] The partition determines which nodes can be used and with what
 #        maximum runtime limits, etc.  Partition limits can be displayed
@@ -48,7 +48,7 @@
 #        PLEASE NOTE:  On DARWIN every job is **required** to include the
 #                      --partition flag in its submission!
 #
-#SBATCH --partition=standard
+#SBATCH --partition=large-mem
 # [EDIT] Jobs that will run in one of the GPU partitions can request GPU
 #        resources using ONE of the following flags:
 #

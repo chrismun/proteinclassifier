@@ -26,6 +26,7 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 num_epochs = 1
 batch_size = 4
 learning_rate = 0.001
+min_samples = 40
 
 # Dataset 
 class ProteinDataset(Dataset):
@@ -34,11 +35,11 @@ class ProteinDataset(Dataset):
         # data loading
         full_protein_list = pd.read_csv("./data/proteins.csv")
         transMemProteins = full_protein_list[full_protein_list['type_id'] == 1]
-        transMemProteins = transMemProteins.head(1500)
+        # transMemProteins = transMemProteins
         transMemProteins['pdbid'] = transMemProteins['pdbid'].str.replace('[^\w]', '', regex=True)  # remove "=...." extra characters
         counts = transMemProteins['membrane_name_cache'].value_counts()
         label_dict_counts = {key: counts[key] for key in counts.index}
-        selected_list = [key for key, value in label_dict_counts.items() if value > 40]
+        selected_list = [key for key, num_samples in label_dict_counts.items() if num_samples > min_samples]
         k = len(selected_list)
         print("NUMCLASS = ", k)
         transMemProteins = transMemProteins[transMemProteins['membrane_name_cache'].isin(selected_list)]

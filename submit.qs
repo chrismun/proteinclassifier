@@ -21,7 +21,7 @@
 #        kibi, mebi, gibi, and tebibyte units.  Delete the space between
 #        the "#" and the word SBATCH to enable one of them:
 #
-#SBATCH --mem=8G
+#SBATCH --mem=512G
 # SBATCH --mem-per-cpu=1024M
 #
 # [EDIT] Each node in the cluster has local scratch disk of some sort
@@ -33,7 +33,7 @@
 #        --mem and --mem-per-cpu.  Delete the space between the "#" and the
 #        word SBATCH to enable:
 #
-#SBATCH --tmp=24G
+# SBATCH --tmp=24G
 #
 # [EDIT] It can be helpful to provide a descriptive (terse) name for
 #        the job (be sure to use quotes if there's whitespace in the
