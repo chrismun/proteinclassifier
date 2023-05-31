@@ -24,7 +24,7 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 # Hyper-parameters 
 num_epochs = 1
-batch_size = 4
+batch_size = 1
 learning_rate = 0.001
 
 # Dataset 
@@ -34,13 +34,12 @@ class ProteinDataset(Dataset):
         # data loading
         full_protein_list = pd.read_csv("./data/proteins.csv")
         transMemProteins = full_protein_list[full_protein_list['type_id'] == 1]
-        transMemProteins = transMemProteins.head(1500)
+        transMemProteins = transMemProteins.head(50)
         transMemProteins['pdbid'] = transMemProteins['pdbid'].str.replace('[^\w]', '', regex=True)  # remove "=...." extra characters
         counts = transMemProteins['membrane_name_cache'].value_counts()
         label_dict_counts = {key: counts[key] for key in counts.index}
-        selected_list = [key for key, value in label_dict_counts.items() if value > 40]
+        selected_list = [key for key, value in label_dict_counts.items() if value > 4]
         k = len(selected_list)
-        print("NUMCLASS = ", k)
         transMemProteins = transMemProteins[transMemProteins['membrane_name_cache'].isin(selected_list)]
         labels = transMemProteins['membrane_name_cache'].unique()
         label_dict = {key: value for value, key in enumerate(sorted(labels))}
@@ -91,8 +90,6 @@ class ProteinDataset(Dataset):
     def __len__(self):
         return self.nsamples
 
-blue = lambda x: '\033[94m' + x + '\033[0m'
-
 # Instantiate data, and split
 dataset = ProteinDataset()
 train_dataset, test_dataset = train_test_split(dataset, test_size=0.2, random_state=42)
@@ -102,66 +99,63 @@ train_loader = DataLoader(dataset=train_dataset, batch_size=4, shuffle=True, num
 test_loader = DataLoader(dataset=test_dataset, batch_size=4, shuffle=False, num_workers=2)
 
 print(f'length of train: {len(train_dataset)}, length of test: {len(test_dataset)}')
-num_classes = 11
+num_classes = 3
 print("num_classes = ", num_classes)
 
 classifier = PointNetCls(k=num_classes, feature_transform=True)
 
 optimizer = optim.Adam(classifier.parameters(), lr=0.001, betas=(0.9, 0.999))
 scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=20, gamma=0.5)
-classifier.to(device)
+classifier.cuda()
 
 num_batch = len(train_dataset) / batch_size
 
-print(len(dataset))
+for epoch in range(num_epochs):
+    scheduler.step()
+    for i, data in enumerate(dataloader, 0):
+        points, target = data
+        target = target[:, 0]
+        points = points.transpose(2, 1)
+        points, target = points.cuda(), target.cuda()
+        optimizer.zero_grad()
+        classifier = classifier.train()
+        pred, trans, trans_feat = classifier(points)
+        loss = F.nll_loss(pred, target)
+        if True:
+            loss += feature_transform_regularizer(trans_feat) * 0.001
+        loss.backward()
+        optimizer.step()
+        pred_choice = pred.data.max(1)[1]
+        correct = pred_choice.eq(target.data).cpu().sum()
+        print('[%d: %d/%d] train loss: %f accuracy: %f' % (epoch, i, num_batch, loss.item(), correct.item() / float(batch_size)))
 
-# for epoch in range(num_epochs):
-#     scheduler.step()
-#     for i, data in enumerate(train_loader, 0):
-#         points, target = data
-#         target = target[:, 0]
-#         points = points.transpose(2, 1)
-#         points, target = points.cuda(), target.cuda()
-#         optimizer.zero_grad()
-#         classifier = classifier.train()
-#         pred, trans, trans_feat = classifier(points)
-#         loss = F.nll_loss(pred, target)
-#         if True:
-#             loss += feature_transform_regularizer(trans_feat) * 0.001
-#         loss.backward()
-#         optimizer.step()
-#         pred_choice = pred.data.max(1)[1]
-#         correct = pred_choice.eq(target.data).cpu().sum()
-#         print('[%d: %d/%d] train loss: %f accuracy: %f' % (epoch, i, num_batch, loss.item(), correct.item() / float(batch_size)))
+        if i % 10 == 0:
+            j, data = next(enumerate(testdataloader, 0))
+            points, target = data
+            target = target[:, 0]
+            points = points.transpose(2, 1)
+            points, target = points.cuda(), target.cuda()
+            classifier = classifier.eval()
+            pred, _, _ = classifier(points)
+            loss = F.nll_loss(pred, target)
+            pred_choice = pred.data.max(1)[1]
+            correct = pred_choice.eq(target.data).cpu().sum()
+            print('[%d: %d/%d] %s loss: %f accuracy: %f' % (epoch, i, num_batch, blue('test'), loss.item(), correct.item()/float(opt.batchSize)))
 
-#         if i % 10 == 0:
-#             j, data = next(enumerate(test_loader, 0))
-#             points, target = data
-#             target = target[:, 0]
-#             points = points.transpose(2, 1)
-#             points, target = points.cuda(), target.cuda()
-#             classifier = classifier.eval()
-#             pred, _, _ = classifier(points)
-#             loss = F.nll_loss(pred, target)
-#             pred_choice = pred.data.max(1)[1]
-#             correct = pred_choice.eq(target.data).cpu().sum()
-#             print('[%d: %d/%d] %s loss: %f accuracy: %f' % (epoch, i, num_batch, blue('test'), loss.item(), correct.item()/float(batch_size)))
-
-#     # torch.save(classifier.state_dict(), '%s/cls_model_%d.pth' % (opt.outf, epoch))
+    # torch.save(classifier.state_dict(), '%s/cls_model_%d.pth' % (opt.outf, epoch))
 
 total_correct = 0
 total_testset = 0
-# for i,data in tqdm(enumerate(test_loader, 0)):
-#     points, target = data
-#     print(points.shape)
-#     target = target[:, 0]
-#     points = points.transpose(2, 1)
-#     points, target = points.cuda(), target.cuda()
-#     classifier = classifier.eval()
-#     pred, _, _ = classifier(points)
-#     pred_choice = pred.data.max(1)[1]
-#     correct = pred_choice.eq(target.data).cpu().sum()
-#     total_correct += correct.item()
-#     total_testset += points.size()[0]
+for i,data in tqdm(enumerate(testdataloader, 0)):
+    points, target = data
+    target = target[:, 0]
+    points = points.transpose(2, 1)
+    points, target = points.cuda(), target.cuda()
+    classifier = classifier.eval()
+    pred, _, _ = classifier(points)
+    pred_choice = pred.data.max(1)[1]
+    correct = pred_choice.eq(target.data).cpu().sum()
+    total_correct += correct.item()
+    total_testset += points.size()[0]
 
-# print("final accuracy {}".format(total_correct / float(total_testset)))
+print("final accuracy {}".format(total_correct / float(total_testset)))

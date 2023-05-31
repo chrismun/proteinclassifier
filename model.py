@@ -7,7 +7,6 @@ from torch.autograd import Variable
 import numpy as np
 import torch.nn.functional as F
 
-
 class STN3d(nn.Module):
     def __init__(self):
         super(STN3d, self).__init__()
@@ -87,7 +86,7 @@ class STNkd(nn.Module):
 class PointNetfeat(nn.Module):
     def __init__(self, global_feat = True, feature_transform = False):
         super(PointNetfeat, self).__init__()
-        self.stn = STN3d()
+        self.stn = STNkd(5)
         self.conv1 = torch.nn.Conv1d(5, 64, 1)
         self.conv2 = torch.nn.Conv1d(64, 128, 1)
         self.conv3 = torch.nn.Conv1d(128, 1024, 1)
@@ -204,10 +203,10 @@ if __name__ == '__main__':
     out, _, _ = pointfeat(sim_data)
     print('point feat', out.size())
 
-    cls = PointNetCls(k = 11)
+    cls = PointNetCls(k = 19)
     out, _, _ = cls(sim_data)
     print('class', out.size())
 
-    seg = PointNetDenseCls(k = 3)
+    seg = PointNetDenseCls(k = 5)
     out, _, _ = seg(sim_data)
     print('seg', out.size())

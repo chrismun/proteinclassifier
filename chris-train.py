@@ -23,7 +23,7 @@ from tqdm import tqdm
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 # Hyper-parameters 
-num_epochs = 1
+num_epochs = 10
 batch_size = 4
 learning_rate = 0.001
 
@@ -34,7 +34,7 @@ class ProteinDataset(Dataset):
         # data loading
         full_protein_list = pd.read_csv("./data/proteins.csv")
         transMemProteins = full_protein_list[full_protein_list['type_id'] == 1]
-        transMemProteins = transMemProteins.head(500)
+        transMemProteins = transMemProteins.head(1000)
         transMemProteins['pdbid'] = transMemProteins['pdbid'].str.replace('[^\w]', '', regex=True)  # remove "=...." extra characters
         counts = transMemProteins['membrane_name_cache'].value_counts()
         label_dict_counts = {key: counts[key] for key in counts.index}
@@ -90,29 +90,32 @@ class ProteinDataset(Dataset):
     def __len__(self):
         return self.nsamples
 
+blue = lambda x: '\033[94m' + x + '\033[0m'
+
 # Instantiate data, and split
 dataset = ProteinDataset()
 train_dataset, test_dataset = train_test_split(dataset, test_size=0.2, random_state=42)
 
 # Create the dataloaders for training and test sets
-train_loader = DataLoader(dataset=train_dataset, batch_size=4, shuffle=True, num_workers=2)
-test_loader = DataLoader(dataset=test_dataset, batch_size=4, shuffle=False, num_workers=2)
+train_loader = DataLoader(dataset=train_dataset, batch_size=4, shuffle=True, num_workers=1, drop_last=True)
+test_loader = DataLoader(dataset=test_dataset, batch_size=4, shuffle=False, num_workers=1, drop_last=True)
 
 print(f'length of train: {len(train_dataset)}, length of test: {len(test_dataset)}')
-num_classes = 11
+num_classes = 12
 print("num_classes = ", num_classes)
 
+# Create model, optimizer, scheduler
 classifier = PointNetCls(k=num_classes, feature_transform=True)
-
 optimizer = optim.Adam(classifier.parameters(), lr=0.001, betas=(0.9, 0.999))
 scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=20, gamma=0.5)
 classifier.cuda()
 
 num_batch = len(train_dataset) / batch_size
 
+# Training Loop
 for epoch in range(num_epochs):
     scheduler.step()
-    for i, data in enumerate(dataloader, 0):
+    for i, data in enumerate(train_loader, 0):
         points, target = data
         target = target[:, 0]
         points = points.transpose(2, 1)
@@ -130,7 +133,7 @@ for epoch in range(num_epochs):
         print('[%d: %d/%d] train loss: %f accuracy: %f' % (epoch, i, num_batch, loss.item(), correct.item() / float(batch_size)))
 
         if i % 10 == 0:
-            j, data = next(enumerate(testdataloader, 0))
+            j, data = next(enumerate(test_loader, 0))
             points, target = data
             target = target[:, 0]
             points = points.transpose(2, 1)
@@ -140,13 +143,13 @@ for epoch in range(num_epochs):
             loss = F.nll_loss(pred, target)
             pred_choice = pred.data.max(1)[1]
             correct = pred_choice.eq(target.data).cpu().sum()
-            print('[%d: %d/%d] %s loss: %f accuracy: %f' % (epoch, i, num_batch, blue('test'), loss.item(), correct.item()/float(opt.batchSize)))
+            print('[%d: %d/%d] %s loss: %f accuracy: %f' % (epoch, i, num_batch, blue('test'), loss.item(), correct.item()/float(batch_size)))
 
     # torch.save(classifier.state_dict(), '%s/cls_model_%d.pth' % (opt.outf, epoch))
 
 total_correct = 0
 total_testset = 0
-for i,data in tqdm(enumerate(testdataloader, 0)):
+for i,data in tqdm(enumerate(test_loader, 0)):
     points, target = data
     target = target[:, 0]
     points = points.transpose(2, 1)
