@@ -28,10 +28,10 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 # Hyper-parameters 
 num_epochs = 10
-batch_size = 4
-learning_rate = 0.003
-min_samples = 10
-npoints = 1000
+batch_size = 8
+learning_rate = 0.001
+min_samples = 100
+npoints = 2048
 subset = True
 
 # sweep_config = {
@@ -67,7 +67,7 @@ class ProteinDataset(Dataset):
         full_protein_list = pd.read_csv("./data/proteins.csv")
         transMemProteins = full_protein_list[full_protein_list['type_id'] == 1]
         if subset:
-            choice = np.random.choice(len(transMemProteins), 600, replace=True)
+            choice = np.random.choice(len(transMemProteins), 1000, replace=True)
             transMemProteins = transMemProteins.iloc[choice, :]
         transMemProteins['pdbid'] = transMemProteins['pdbid'].str.replace('[^\w]', '', regex=True)  # remove "=...." extra characters
         counts = transMemProteins['membrane_name_cache'].value_counts()
@@ -177,7 +177,9 @@ sampler = WeightedRandomSampler(sample_weights.type('torch.DoubleTensor'), len(d
 
 
 # Create the dataloaders for training and test sets
-train_loader = DataLoader(dataset=train_dataset, batch_size=batch_size, num_workers=1, sampler=sampler, drop_last=True)
+# weighted sampler data loader - not working properly 
+# train_loader = DataLoader(dataset=train_dataset, batch_size=batch_size, num_workers=1, sampler=sampler, drop_last=True)
+train_loader = DataLoader(dataset=train_dataset, batch_size=batch_size, num_workers=1, shuffle=True, drop_last=True)
 test_loader = DataLoader(dataset=test_dataset, batch_size=batch_size, shuffle=False, num_workers=1, drop_last=True)
 
 print(f'length of train: {len(train_dataset)}, length of test: {len(test_dataset)}')
