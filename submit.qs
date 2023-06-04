@@ -6,6 +6,7 @@
 #SBATCH  -p GPU-shared 
 #SBATCH --gres=gpu:v100-32:1
 #SBATCH --time=00:05:00
+# NOTE : I have been doing interactive runs, with 4 GPUs, instead of this 
 module load anaconda3
 source activate protcls
-python chris-train.py
+python train.py

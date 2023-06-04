@@ -3,246 +3,165 @@ import torch
 #import torchvision
 from torch.utils.data import Dataset, DataLoader, WeightedRandomSampler
 import numpy as np
-import pandas as pd
-import os
 from pyuul import utils
 from sklearn.model_selection import train_test_split
-from torch.utils.data import Subset
-import argparse
 import os
-import random
 import torch
 import torch.nn.parallel
 import torch.optim as optim
+import torch.nn as nn
 import torch.utils.data
 from model import PointNetCls, feature_transform_regularizer
 import torch.nn.functional as F
 from tqdm import tqdm
-import h5py
-import wandb
+# import wandb
+from sklearn.metrics import f1_score
 
 # Device configuration
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-# wandb.login()
-
 # Hyper-parameters 
-num_epochs = 10
-batch_size = 8
-learning_rate = 0.001
-min_samples = 100
-npoints = 2048
-subset = True
+num_epochs = 100
+batch_size = 50
+learning_rate = 0.01
 
-# sweep_config = {
-#     'method': 'random',
-#     'metric': {
-#         'name': 'val_accuracy',
-#         'goal': 'maximize'
-#     },
-#     'parameters': {
-#         'batch_size': {
-#             'values': [4,32]
-#         },
-#         'learning_rate': {
-#             'values': [0.001,0.01,0.0001]
-#         },
-#         'num_epochs': {
-#             'values': [10, 20] # number of epoch to run after resume epoch
-#         },
-#         'npoints': {
-#             'values':[2500, 5000]
-#         }
-#     }
-# }
-
+# wandb.login()
+# sweep_config = {}
 # sweep_id= wandb.sweep(sweep_config,project="proteinclassifier")
 
+def one_hot(a, num_classes):
+  return np.squeeze(np.eye(num_classes)[a.reshape(-1)])
+
+def test(dataloader, classifier):
+    total_correct = 0
+    total_testset = 0
+    preds = []
+    targets = []
+
+    with torch.no_grad():
+        for _ ,data in tqdm(enumerate(dataloader, 0)):
+            points, _, target = data
+            points = points.permute(0, 2, 1).float()
+            points, target = points.cuda(), target.cuda()
+            pred, _, _ = classifier(points)
+            pred_choice = pred.data.max(1)[1]
+            
+            correct = pred_choice.eq(target.data).cpu().sum()
+            total_correct += correct.item()
+            total_testset += points.size()[0]
+            # wandb.log(
+            #     "test set acc": (total_correct/float(total_testset))
+            # )
+            
+            preds.append(pred_choice.cpu())
+            targets.append(target.cpu().data)
+        
+        preds = torch.cat(preds).numpy()
+        targets = torch.cat(targets).numpy()
+
+    return total_correct / float(total_testset), f1_score(targets, preds, average='weighted')
+
+def shuffle_along_axis(a, axis):
+    idx = np.random.rand(*a.shape).argsort(axis=axis)
+    return np.take_along_axis(a,idx,axis=axis)
 
 # Dataset 
 class ProteinDataset(Dataset):
 
-    def __init__(self):
+    def __init__(self, fn):
         # data loading
-        full_protein_list = pd.read_csv("./data/proteins.csv")
-        transMemProteins = full_protein_list[full_protein_list['type_id'] == 1]
-        if subset:
-            choice = np.random.choice(len(transMemProteins), 1000, replace=True)
-            transMemProteins = transMemProteins.iloc[choice, :]
-        transMemProteins['pdbid'] = transMemProteins['pdbid'].str.replace('[^\w]', '', regex=True)  # remove "=...." extra characters
-        counts = transMemProteins['membrane_name_cache'].value_counts()
-        label_dict_counts = {key: counts[key] for key in counts.index}
-        selected_list = [key for key, num_samples in label_dict_counts.items() if num_samples > min_samples]
-        k = len(selected_list)
-        transMemProteins = transMemProteins[transMemProteins['membrane_name_cache'].isin(selected_list)]
-        labels = transMemProteins['membrane_name_cache'].unique()
-        label_dict = {key: value for value, key in enumerate(sorted(labels))}
-        labels = list(label_dict.keys())
-        # self.label_dict_counts = label_dict_counts
-        # self.num_classes = len(labels)
-        # self.counts = counts
+        self.data = np.load(fn, 'rb')
+        self.x = self.data['x']
+        self.y = np.reshape(self.data['y'], (-1,))
+        self.n_points = self.x.shape[1]
 
-        x = []
-        y = []
-        for i, pdb_id in enumerate(transMemProteins['pdbid']):
-            file_name = pdb_id + '.pdb'
-            file_path = os.path.join('./data/pdb', file_name)
-
-            if os.path.exists(file_path):
-                coords, atname = utils.parsePDB(file_path, keep_hetatm=False)
-                radius = utils.atomlistToRadius(atname)
-                atomType = utils.atomlistToChannels(atname)
-
-                radius = radius.tolist()[0]
-                atomType = atomType.tolist()[0]
-
-                file_name = pdb_id + '.pdb'
-                file_path = os.path.join('./data/pdb', file_name)
-
-                coords, atname = utils.parsePDB(file_path, keep_hetatm=False)
-                radius = utils.atomlistToRadius(atname)
-                atomType = utils.atomlistToChannels(atname)
-
-                radius = radius.tolist()[0]
-                atomType = atomType.tolist()[0]
-
-                coords = coords.tolist()
-                coords = coords[0]
-                i = 0
-
-                for coord in coords:
-                    coord.append(radius[i])
-                    coord.append(atomType[i])
-
-                a = transMemProteins.loc[transMemProteins['pdbid'] == pdb_id, 'membrane_name_cache'].iloc[0]
-
-                x.append(coords)
-                y.append([label_dict[a]])
-            else:
-                print(f"The file {file_path} does not exist.")
-
-        # fixing varying size
-        max_len = max(len(entry) for entry in x)
-        # Pad shorter entries with all-zero entries
-        for i, entry in enumerate(x):
-            if len(entry) < max_len:
-                num_padding = max_len - len(entry)
-                for j in range(0, num_padding):
-                    x[i].append(x[i][0])
-        
-        class_count = {}
-        j = 0
-        for prot in x:
-            class_count[y[j][0]] = class_count.setdefault(y[j][0], 0) + 1
-            j += 1
-
-        for k, v in class_count.items():
-            print("Label:", k, "count:", v)
-        print("LENCLASSCT:", len(class_count))
-
-
-        self.class_count = class_count
-        self.num_classes = len(class_count)
-        self.nsamples = len(x)
-        self.x = torch.tensor(x)
-        self.y = torch.tensor(y)
+        self.num_classes = np.unique(self.y).shape[0]
+        self.nsamples = self.x.shape[0]
+        # self.x = torch.from_numpy(self.x)
+        # self.y = torch.from_numpy(self.y)
 
     def __getitem__(self, index):
-        point_set = self.x[index]
-        choice = np.random.choice(len(point_set), npoints, replace=True)
-        point_set = point_set[choice, :]
-        return point_set, self.y[index]
+        point_data = self.x[index]
+        # point_data = shuffle_along_axis(point_data, axis=1)
+        theta1 = np.random.uniform(0,np.pi*2)
+        theta2 = np.random.uniform(0,np.pi*2)
+        theta3 = np.random.uniform(0,np.pi*2)
+        trans_matrix1 = np.array([[np.cos(theta1),-np.sin(theta1)],
+                                    [np.sin(theta1), np.cos(theta1)]])
+        trans_matrix2 = np.array([[np.cos(theta2), -np.sin(theta2)],
+                                    [np.sin(theta2), np.cos(theta2)]])
+        trans_matrix3 = np.array([[np.cos(theta3),-np.sin(theta3)],
+                                    [np.sin(theta3), np.cos(theta3)]])
+        point_data[:,[0,1]] = point_data[:,[0,1]].dot(trans_matrix1)
+        point_data[:,[0,2]] = point_data[:,[0,2]].dot(trans_matrix2)
+        point_data[:,[1,2]] = point_data[:,[1,2]].dot(trans_matrix3)
+        return point_data, one_hot(self.y[index], self.num_classes), self.y[index]
 
     def __len__(self):
         return self.nsamples
 
-blue = lambda x: '\033[94m' + x + '\033[0m'
+blue = lambda x: '\033[94m' + x + '\033[0m' 
 
-# Instantiate data, and split
-dataset = ProteinDataset()
+# Dataset
+dataset = ProteinDataset('protein-data2.npz')
 train_dataset, test_dataset = train_test_split(dataset, test_size=0.2, random_state=42)
 
+# Weighted sampler
+weight = [1./128, 1./269, 1./790, 1./476, 1./233, 1./168, 1./50, 1./26, 1./46]
+samples_weight = np.array([weight[y] for _, _, y in train_dataset])
+samples_weight = torch.tensor(samples_weight)
+sampler = WeightedRandomSampler(samples_weight.type('torch.DoubleTensor'), len(samples_weight))
 
-print("number of classes = ", dataset.num_classes)
-
-label_weight = { l: 1/v for l,v in dataset.class_count.items() }
-sample_weights = []
-for sample in train_dataset:
-    sample_weights.append(label_weight[sample[1][0].item()])
-# print(sample_weights)
-sample_weights = torch.tensor(sample_weights)
-
-# sampler = WeightedRandomSampler(samples_weight.type('torch.DoubleTensor'), len(samples_weight), replacement=True)
-sampler = WeightedRandomSampler(sample_weights.type('torch.DoubleTensor'), len(dataset), replacement=True)
-
-
-# Create the dataloaders for training and test sets
-# weighted sampler data loader - not working properly 
-# train_loader = DataLoader(dataset=train_dataset, batch_size=batch_size, num_workers=1, sampler=sampler, drop_last=True)
-train_loader = DataLoader(dataset=train_dataset, batch_size=batch_size, num_workers=1, shuffle=True, drop_last=True)
+# Dataloaders 
+train_loader = DataLoader(dataset=train_dataset, batch_size=batch_size, num_workers=8, sampler=sampler, drop_last=True) # train_loader = DataLoader(dataset=train_dataset, batch_size=batch_size, num_workers=8, shuffle=True, drop_last=True)
 test_loader = DataLoader(dataset=test_dataset, batch_size=batch_size, shuffle=False, num_workers=1, drop_last=True)
 
 print(f'length of train: {len(train_dataset)}, length of test: {len(test_dataset)}')
+print("number of classes = ", dataset.num_classes)
 
-# Create model, optimizer, scheduler
-classifier = PointNetCls(k=dataset.num_classes, feature_transform=True)
-optimizer = optim.Adam(classifier.parameters(), lr=learning_rate, betas=(0.9, 0.999))
-scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.5)
-classifier.cuda()
+# Create model, optimizer, loss, scheduler
+classifier = PointNetCls(k=dataset.num_classes, feature_transform=True).cuda()
+optimizer = optim.Adam(classifier.parameters(), lr=learning_rate, betas=(0.9, 0.999), weight_decay=0.0)
+# criterion = nn.CrossEntropyLoss(label_smoothing=0.6).cuda()
+criterion = nn.SmoothL1Loss()
+scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=25, gamma=0.1)
+
 # wandb.watch(classifier)
-num_batch = len(train_dataset) / batch_size
+classifier = nn.DataParallel(classifier, [0, 1, 2, 3])
+classifier.train()
 
 # Training Loop
+num_batch = len(train_dataset) / batch_size
+
 for epoch in range(num_epochs):
-    for i, data in enumerate(train_loader, 0):
-        points, target = data
-        target = target[:, 0]
-        points = points.transpose(2, 1)
+    for i, data in enumerate(train_loader):
+        points, target, _ = data
+        points = points.permute(0, 2, 1).float()
         points, target = points.cuda(), target.cuda()
-        optimizer.zero_grad()
-        classifier = classifier.train()
         pred, trans, trans_feat = classifier(points)
-        loss = F.nll_loss(pred, target)
+
+        optimizer.zero_grad()
+        loss = criterion(pred, target)
+        # loss = F.nll_loss(pred, target)
         if True:
             loss += feature_transform_regularizer(trans_feat) * 0.001
         loss.backward()
         optimizer.step()
-        pred_choice = pred.data.max(1)[1]
-        correct = pred_choice.eq(target.data).cpu().sum()
-        print('[%d: %d/%d] train loss: %f accuracy: %f' % (epoch, i, num_batch, loss.item(), correct.item() / float(batch_size)))
 
-        if i % 10 == 0:
-            j, data = next(enumerate(test_loader, 0))
-            points, target = data
-            target = target[:, 0]
-            points = points.transpose(2, 1)
-            points, target = points.cuda(), target.cuda()
-            classifier = classifier.eval()
-            pred, _, _ = classifier(points)
-            loss = F.nll_loss(pred, target)
-            pred_choice = pred.data.max(1)[1]
-            correct = pred_choice.eq(target.data).cpu().sum()
+        if i % 5 == 0:
+            print('[%d: %d/%d] train loss: %.2f' % (epoch, i, num_batch, loss.item()))
+
+        if i % 20 == 0:
+            accuracy, f1 = test(test_loader, classifier)
+            # taccuracy, tf1 = test(train_loader, classifier)
             # wandb.log({"loss": loss.item(), "accuracy": correct.item()/float(batch_size)})
-            print('[%d: %d/%d] %s loss: %f accuracy: %f' % (epoch, i, num_batch, blue('test'), loss.item(), correct.item()/float(batch_size)))
+            # print('[%d: %d/%d] %s: train accuracy: %.5f, f1: %.5f' % (epoch, i, num_batch, blue('test'), taccuracy, tf1))
+            print('[%d: %d/%d] %s: val accuracy: %.5f, f1: %.5f' % (epoch, i, num_batch, blue('test'), accuracy, f1))
     scheduler.step()
     # torch.save(classifier.state_dict(), '%s/cls_model_%d.pth' % (opt.outf, epoch))
 
-total_correct = 0
-total_testset = 0
-for i,data in tqdm(enumerate(test_loader, 0)):
-    points, target = data
-    target = target[:, 0]
-    points = points.transpose(2, 1)
-    points, target = points.cuda(), target.cuda()
-    classifier = classifier.eval()
-    pred, _, _ = classifier(points)
-    pred_choice = pred.data.max(1)[1]
-    correct = pred_choice.eq(target.data).cpu().sum()
-    total_correct += correct.item()
-    total_testset += points.size()[0]
-    # wandb.log(
-    #     "test set acc": (total_correct/float(total_testset))
-    # )
+classifier.eval()
+accuracy, f1 = test(test_loader, classifier)
+print('Test: accuracy: %.5f, f1: %.5f' % (accuracy, f1))
 
-print("final accuracy {}".format(total_correct / float(total_testset)))
 # wandb.agent(sweep_id,train,count=3)
