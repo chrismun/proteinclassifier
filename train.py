@@ -24,11 +24,13 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 num_epochs = 100
 batch_size = 50
 learning_rate = 0.01
+feature_transform = True
 
 # wandb.login()
 # sweep_config = {}
 # sweep_id= wandb.sweep(sweep_config,project="proteinclassifier")
 
+# I think this function, one_hot, is no longer used.
 def one_hot(a, num_classes):
   return np.squeeze(np.eye(num_classes)[a.reshape(-1)])
 
@@ -143,7 +145,7 @@ for epoch in range(num_epochs):
         optimizer.zero_grad()
         loss = criterion(pred, target)
         # loss = F.nll_loss(pred, target)
-        if True:
+        if feature_transform:
             loss += feature_transform_regularizer(trans_feat) * 0.001
         loss.backward()
         optimizer.step()
