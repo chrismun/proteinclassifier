@@ -1,6 +1,5 @@
 # parse pdb to numpy array 
 # x = np.array(n_samples, n_points, 4 channels)
-# y = (n_samples)
 # .npz
 
 import os
@@ -10,9 +9,11 @@ from pyuul import utils
 import torch
 
 min_samples = 100
+# median = 8514
 
 full_protein_list = pd.read_csv("/jet/home/munley/proteinclassifier/data/proteins.csv")
 transMemProteins = full_protein_list[full_protein_list['type_id'] == 1]
+
 transMemProteins['pdbid'] = transMemProteins['pdbid'].str.replace('[^\w]', '', regex=True)  # remove "=...." extra characters
 counts = transMemProteins['membrane_name_cache'].value_counts()
 label_dict_counts = {key: counts[key] for key in counts.index}
@@ -51,8 +52,8 @@ for i, pdb_id in enumerate(transMemProteins['pdbid']):
         coords = coords.tolist()
         coords = coords[0]
         all_coord_lengths.append(len(coords))
-        # only keep Q1 - Q3
-        if len(coords) < 3650 or len(coords) > 14660:
+        # filter
+        if len(coords) < 1000 or len(coords) > 8192:
             continue
 
         i = 0
@@ -69,26 +70,36 @@ for i, pdb_id in enumerate(transMemProteins['pdbid']):
     else:
         print(f"The file {file_path} does not exist.")
 
-# Pad to constant size 
+
+max_len = max(len(entry) for entry in x)
+min_len = min(len(entry) for entry in x)
+print(max_len, min_len)
+
+max_len = 8192
+
 for i, entry in enumerate(x):
     if len(entry) < max_len:
         orig_len = len(entry)
         num_padding = max_len - len(entry)
         for j in range(0, num_padding):
-            # append a random point until theyre all the same length
+            # append a point until theyre all the same length
             x[i].append(x[i][j % orig_len])
 
-# build class counts
 class_count = {}
 j = 0
 for prot in x:
     class_count[y[j][0]] = class_count.setdefault(y[j][0], 0) + 1
     j += 1
 
-# print class counts
+sorted_dict = dict(sorted(class_count.items(), key=lambda x: int(x[0])))
+
+print("print(class_count): ", class_count)
+print("len(class_count):", len(class_count))
+
 for k, v in class_count.items():
     print("Label:", k, "count:", v)
-print("Num Classes:", len(class_count))
+
+
 
 class_count = class_count
 num_classes = len(class_count)
@@ -96,9 +107,10 @@ nsamples = len(x)
 x = np.array(x)
 y = np.array(y)
 
-print("x, y shape: ", x.shape, y.shape)
+print(x.shape, y.shape)
 
-# coords length data info
+# coord len data info
+# print()
 mean_value = np.mean(all_coord_lengths)
 median_value = np.median(all_coord_lengths)
 std_dev = np.std(all_coord_lengths)
@@ -110,4 +122,4 @@ print("Median:", median_value)
 print("Standard Deviation:", std_dev)
 print("Q1:", q1)
 print("Q3:", q3)
-np.savez('protein-data3.npz', x=x, y=y)
+np.savez('protein-data.npz', x=x, y=y)

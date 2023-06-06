@@ -20,17 +20,44 @@ from sklearn.metrics import f1_score
 # Device configuration
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-# Hyper-parameters 
-num_epochs = 100
-batch_size = 50
-learning_rate = 0.01
-feature_transform = True
-
 # wandb.login()
-# sweep_config = {}
+
+# Hyper-parameters 
+num_epochs = 60
+batch_size = 32
+learning_rate = 0.001
+rand_rotate = False
+rand_jitter = True
+feature_trans = False 
+
+#min_samples = 100
+#npoints = 2048
+#subset = False
+
+# sweep_config = {
+#     'method': 'random',
+#     'metric': {
+#         'name': 'val_accuracy',
+#         'goal': 'maximize'
+#     },
+#     'parameters': {
+#         'batch_size': {
+#             'values': [4,32]
+#         },
+#         'learning_rate': {
+#             'values': [0.001,0.01,0.0001]
+#         },
+#         'num_epochs': {
+#             'values': [10, 20] # number of epoch to run after resume epoch
+#         },
+#         'npoints': {
+#             'values':[2500, 5000]
+#         }
+#     }
+# }
+
 # sweep_id= wandb.sweep(sweep_config,project="proteinclassifier")
 
-# I think this function, one_hot, is no longer used.
 def one_hot(a, num_classes):
   return np.squeeze(np.eye(num_classes)[a.reshape(-1)])
 
@@ -60,8 +87,10 @@ def test(dataloader, classifier):
         
         preds = torch.cat(preds).numpy()
         targets = torch.cat(targets).numpy()
+        #  print(preds)
 
     return total_correct / float(total_testset), f1_score(targets, preds, average='weighted')
+    # wandb.agent(sweep_id,train,count=3)
 
 def shuffle_along_axis(a, axis):
     idx = np.random.rand(*a.shape).argsort(axis=axis)
@@ -84,19 +113,26 @@ class ProteinDataset(Dataset):
 
     def __getitem__(self, index):
         point_data = self.x[index]
-        # point_data = shuffle_along_axis(point_data, axis=1)
-        theta1 = np.random.uniform(0,np.pi*2)
-        theta2 = np.random.uniform(0,np.pi*2)
-        theta3 = np.random.uniform(0,np.pi*2)
-        trans_matrix1 = np.array([[np.cos(theta1),-np.sin(theta1)],
-                                    [np.sin(theta1), np.cos(theta1)]])
-        trans_matrix2 = np.array([[np.cos(theta2), -np.sin(theta2)],
-                                    [np.sin(theta2), np.cos(theta2)]])
-        trans_matrix3 = np.array([[np.cos(theta3),-np.sin(theta3)],
-                                    [np.sin(theta3), np.cos(theta3)]])
-        point_data[:,[0,1]] = point_data[:,[0,1]].dot(trans_matrix1)
-        point_data[:,[0,2]] = point_data[:,[0,2]].dot(trans_matrix2)
-        point_data[:,[1,2]] = point_data[:,[1,2]].dot(trans_matrix3)
+        
+        # random rotation
+        if rand_rotate:
+            theta1 = np.random.uniform(0,np.pi*2)
+            theta2 = np.random.uniform(0,np.pi*2)
+            theta3 = np.random.uniform(0,np.pi*2)
+            trans_matrix1 = np.array([[np.cos(theta1),-np.sin(theta1)],
+                                        [np.sin(theta1), np.cos(theta1)]])
+            trans_matrix2 = np.array([[np.cos(theta2), -np.sin(theta2)],
+                                        [np.sin(theta2), np.cos(theta2)]])
+            trans_matrix3 = np.array([[np.cos(theta3),-np.sin(theta3)],
+                                        [np.sin(theta3), np.cos(theta3)]])
+            point_data[:,[0,1]] = point_data[:,[0,1]].dot(trans_matrix1)
+            point_data[:,[0,2]] = point_data[:,[0,2]].dot(trans_matrix2)
+            point_data[:,[1,2]] = point_data[:,[1,2]].dot(trans_matrix3)
+        # jitter
+        if rand_jitter:
+            jitter = np.random.normal(0,0.02,size=point_data.shape)
+            jitter[:,[0,1,2]] = 0
+            point_data += jitter
         return point_data, one_hot(self.y[index], self.num_classes), self.y[index]
 
     def __len__(self):
@@ -105,28 +141,30 @@ class ProteinDataset(Dataset):
 blue = lambda x: '\033[94m' + x + '\033[0m' 
 
 # Dataset
-dataset = ProteinDataset('protein-data2.npz')
+dataset = ProteinDataset('protein-data.npz')
 train_dataset, test_dataset = train_test_split(dataset, test_size=0.2, random_state=42)
 
-# Weighted sampler
-weight = [1./128, 1./269, 1./790, 1./476, 1./233, 1./168, 1./50, 1./26, 1./46]
+# Weighted sampler 
+weights_dict = {4: 333, 8: 92, 3: 825, 7: 115, 5: 234, 2: 1600, 0: 148, 6: 206, 1: 371} # comes from preprocess
+weight = [1 / value for _, value in sorted(weights_dict.items())]
 samples_weight = np.array([weight[y] for _, _, y in train_dataset])
 samples_weight = torch.tensor(samples_weight)
 sampler = WeightedRandomSampler(samples_weight.type('torch.DoubleTensor'), len(samples_weight))
 
 # Dataloaders 
-train_loader = DataLoader(dataset=train_dataset, batch_size=batch_size, num_workers=8, sampler=sampler, drop_last=True) # train_loader = DataLoader(dataset=train_dataset, batch_size=batch_size, num_workers=8, shuffle=True, drop_last=True)
+train_loader = DataLoader(dataset=train_dataset, batch_size=batch_size, num_workers=8, sampler=sampler, drop_last=True) # No weighted sampler: train_loader = DataLoader(dataset=train_dataset, batch_size=batch_size, num_workers=8, shuffle=True, drop_last=True)
 test_loader = DataLoader(dataset=test_dataset, batch_size=batch_size, shuffle=False, num_workers=1, drop_last=True)
 
 print(f'length of train: {len(train_dataset)}, length of test: {len(test_dataset)}')
 print("number of classes = ", dataset.num_classes)
 
 # Create model, optimizer, loss, scheduler
-classifier = PointNetCls(k=dataset.num_classes, feature_transform=True).cuda()
+classifier = PointNetCls(k=dataset.num_classes, feature_transform=feature_trans).cuda()
+#optimizer = optim.SGD(classifier.parameters(), lr=learning_rate, momentum=0.9)
 optimizer = optim.Adam(classifier.parameters(), lr=learning_rate, betas=(0.9, 0.999), weight_decay=0.0)
-# criterion = nn.CrossEntropyLoss(label_smoothing=0.6).cuda()
+#criterion = nn.CrossEntropyLoss(label_smoothing=0.6).cuda()
 criterion = nn.SmoothL1Loss()
-scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=25, gamma=0.1)
+scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=15, gamma=0.1)
 
 # wandb.watch(classifier)
 classifier = nn.DataParallel(classifier, [0, 1, 2, 3])
@@ -145,7 +183,7 @@ for epoch in range(num_epochs):
         optimizer.zero_grad()
         loss = criterion(pred, target)
         # loss = F.nll_loss(pred, target)
-        if feature_transform:
+        if feature_trans:
             loss += feature_transform_regularizer(trans_feat) * 0.001
         loss.backward()
         optimizer.step()
@@ -154,16 +192,19 @@ for epoch in range(num_epochs):
             print('[%d: %d/%d] train loss: %.2f' % (epoch, i, num_batch, loss.item()))
 
         if i % 20 == 0:
-            accuracy, f1 = test(test_loader, classifier)
-            # taccuracy, tf1 = test(train_loader, classifier)
+            continue
+            #accuracy, f1 = test(test_loader, classifier)
+            #taccuracy, tf1 = test(train_loader, classifier)
             # wandb.log({"loss": loss.item(), "accuracy": correct.item()/float(batch_size)})
-            # print('[%d: %d/%d] %s: train accuracy: %.5f, f1: %.5f' % (epoch, i, num_batch, blue('test'), taccuracy, tf1))
-            print('[%d: %d/%d] %s: val accuracy: %.5f, f1: %.5f' % (epoch, i, num_batch, blue('test'), accuracy, f1))
+            #print('[%d: %d/%d] %s: train accuracy: %.5f, f1: %.5f' % (epoch, i, num_batch, blue('test'), taccuracy, tf1))
+            #print('[%d: %d/%d] %s: val accuracy: %.5f, f1: %.5f' % (epoch, i, num_batch, blue('test'), accuracy, f1))
     scheduler.step()
+    accuracy, f1 = test(test_loader, classifier)
+    taccuracy, tf1 = test(train_loader, classifier)
+    print('[%d: %d/%d] %s: val accuracy: %.5f, f1: %.5f' % (epoch, i, num_batch, blue('test'), accuracy, f1))
+    print('[%d: %d/%d] %s: train accuracy: %.5f, f1: %.5f' % (epoch, i, num_batch, blue('test'), taccuracy, tf1))
     # torch.save(classifier.state_dict(), '%s/cls_model_%d.pth' % (opt.outf, epoch))
 
 classifier.eval()
 accuracy, f1 = test(test_loader, classifier)
 print('Test: accuracy: %.5f, f1: %.5f' % (accuracy, f1))
-
-# wandb.agent(sweep_id,train,count=3)
