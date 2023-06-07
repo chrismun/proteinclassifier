@@ -23,12 +23,16 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 # wandb.login()
 
 # Hyper-parameters 
-num_epochs = 60
-batch_size = 32
-learning_rate = 0.001
+num_epochs = 200
+batch_size = 64
+learning_rate = 0.03
 rand_rotate = False
 rand_jitter = True
-feature_trans = False 
+feature_trans = False
+lr_step_size = 50
+gamma = .1
+optimizer_fn = "adam"
+loss_fn = "crossEntropy"
 
 #min_samples = 100
 #npoints = 2048
@@ -152,7 +156,7 @@ samples_weight = torch.tensor(samples_weight)
 sampler = WeightedRandomSampler(samples_weight.type('torch.DoubleTensor'), len(samples_weight))
 
 # Dataloaders 
-train_loader = DataLoader(dataset=train_dataset, batch_size=batch_size, num_workers=8, sampler=sampler, drop_last=True) # No weighted sampler: train_loader = DataLoader(dataset=train_dataset, batch_size=batch_size, num_workers=8, shuffle=True, drop_last=True)
+train_loader = DataLoader(dataset=train_dataset, batch_size=batch_size, num_workers=8, sampler=sampler, drop_last=True) # train_loader = DataLoader(dataset=train_dataset, batch_size=batch_size, num_workers=8, shuffle=True, drop_last=True)
 test_loader = DataLoader(dataset=test_dataset, batch_size=batch_size, shuffle=False, num_workers=1, drop_last=True)
 
 print(f'length of train: {len(train_dataset)}, length of test: {len(test_dataset)}')
@@ -160,15 +164,22 @@ print("number of classes = ", dataset.num_classes)
 
 # Create model, optimizer, loss, scheduler
 classifier = PointNetCls(k=dataset.num_classes, feature_transform=feature_trans).cuda()
-#optimizer = optim.SGD(classifier.parameters(), lr=learning_rate, momentum=0.9)
-optimizer = optim.Adam(classifier.parameters(), lr=learning_rate, betas=(0.9, 0.999), weight_decay=0.0)
-#criterion = nn.CrossEntropyLoss(label_smoothing=0.6).cuda()
-criterion = nn.SmoothL1Loss()
-scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=15, gamma=0.1)
+if optimizer_fn == "sgd":
+    optimizer = optim.SGD(classifier.parameters(), lr=learning_rate, momentum=0.9)
+elif optimizer_fn == "adam":
+    optimizer = optim.Adam(classifier.parameters(), lr=learning_rate, betas=(0.9, 0.999), weight_decay=0.0)
+
+if loss_fn == "crossEntropy":
+    criterion = nn.CrossEntropyLoss(label_smoothing=0.6).cuda()
+elif loss_fn == "SmoothL1":
+    criterion = nn.SmoothL1Loss()
+scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=lr_step_size, gamma=gamma)
 
 # wandb.watch(classifier)
 classifier = nn.DataParallel(classifier, [0, 1, 2, 3])
 classifier.train()
+
+accuracy_log = {}
 
 # Training Loop
 num_batch = len(train_dataset) / batch_size
@@ -203,8 +214,30 @@ for epoch in range(num_epochs):
     taccuracy, tf1 = test(train_loader, classifier)
     print('[%d: %d/%d] %s: val accuracy: %.5f, f1: %.5f' % (epoch, i, num_batch, blue('test'), accuracy, f1))
     print('[%d: %d/%d] %s: train accuracy: %.5f, f1: %.5f' % (epoch, i, num_batch, blue('test'), taccuracy, tf1))
+    if epoch % 10 == 9:
+        accuracy_log[epoch] = "val acc: {:.2f}, train acc: {:.2f}".format(accuracy, taccuracy)
+
     # torch.save(classifier.state_dict(), '%s/cls_model_%d.pth' % (opt.outf, epoch))
 
 classifier.eval()
 accuracy, f1 = test(test_loader, classifier)
-print('Test: accuracy: %.5f, f1: %.5f' % (accuracy, f1))
+taccuracy, tf1 = test(train_loader, classifier)
+print('[%d: %d/%d] %s: val accuracy: %.5f, f1: %.5f' % (epoch, i, num_batch, blue('test'), accuracy, f1))
+print('[%d: %d/%d] %s: train accuracy: %.5f, f1: %.5f' % (epoch, i, num_batch, blue('test'), taccuracy, tf1))
+print(f'length of train: {len(train_dataset)}, length of test: {len(test_dataset)}')
+print("number of classes = ", dataset.num_classes)
+
+print("Hyperparameters:")
+print("Number of epochs:", num_epochs)
+print("Batch size:", batch_size)
+print("Learning rate:", learning_rate)
+print("Random rotation:", rand_rotate)
+print("Random jitter:", rand_jitter)
+print("Feature transformation:", feature_trans)
+print("Learning rate step size:", lr_step_size)
+print("Gamma:", gamma)
+print("Optimizer fn:", optimizer_fn)
+print("Loss fn:", loss_fn)
+
+for k,v in accuracy_log.items():
+    print("epoch ", k, ":", v)

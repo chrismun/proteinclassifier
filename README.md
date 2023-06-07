@@ -3,4 +3,4 @@ To run train.py, obtain protein-data.npz from me, or run preprocess.py and obtai
 
 Currently set to run on 4 GPUs.
 
-Status : In progress, current accuracy ~ 50% 
+Status : In progress, current accuracy ~ 65% 
