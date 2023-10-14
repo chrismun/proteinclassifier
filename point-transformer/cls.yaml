@@ -1,0 +1,19 @@
+batch_size: 80 # set manually currently 
+epoch: 800
+learning_rate: 1e-3 # adding annealing 
+gpu: 3 # seems like we need 1 extra 
+num_point: 1024
+optimizer: SGD
+weight_decay: 1e-4
+normal: True
+
+defaults:
+  - model: Menghao
+
+hydra:
+  run:
+    dir: log/cls/${model.name}
+
+  sweep:
+    dir: log/cls
+    subdir: ${model.name}
